@@ -40,8 +40,7 @@ def detect_line():
             cv2.line(image, (int(x_min), 200), (int(x_min), 250), (255, 0, 0), 3)
 
         cv2.imshow("orginal with line", image)
-        key = cv2.waitKey(1) & 0xFF
-        if key == ord("q"):
+        if cv2.waitKey(1) == 27:
             break
 
 
