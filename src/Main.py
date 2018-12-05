@@ -9,7 +9,7 @@ roslib.load_manifest('traffic_sign')
 import rospy
 
 from sensor_msgs.msg import CompressedImage
-from std_msgs.msg import String
+
 
 def force_odd_number(num):
     if num % 2 == 0:
@@ -51,7 +51,7 @@ def init():
     raspi_subscriber = rospy.Subscriber("/raspicam_node/image/compressed", CompressedImage, self.callback)
     rospy.loginfo("Subscribed to /raspicam_node/image/compressed")
 
-    detection_publisher = rospy.Publisher("/line_follow/detected", String, queue_size=10)
+    detection_publisher = rospy.Publisher("/line_follow/detected", int, queue_size=10)
 
 
 rospy.loginfo("Publishing /line_follow/detected")
