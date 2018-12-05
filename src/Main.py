@@ -2,8 +2,14 @@
 import math
 
 import cv2
-from cv2.cv2 import INTER_LINEAR
+import numpy as np
+import roslib
 
+roslib.load_manifest('traffic_sign')
+import rospy
+
+from sensor_msgs.msg import CompressedImage
+from std_msgs.msg import String
 
 def force_odd_number(num):
     if num % 2 == 0:
@@ -38,16 +44,39 @@ gaussian_blur_kernel = force_odd_number(int(width / 30))
 TO_LEFT = -1
 TO_RIGHT = +1
 
+raspi_subscriber = detection_publisher = image_publisher = None
 
-def detect_line():
+
+def init():
+    raspi_subscriber = rospy.Subscriber("/raspicam_node/image/compressed", CompressedImage, self.callback)
+    rospy.loginfo("Subscribed to /raspicam_node/image/compressed")
+
+    detection_publisher = rospy.Publisher("/line_follow/detected", String, queue_size=10)
+
+
+rospy.loginfo("Publishing /line_follow/detected")
+
+image_publisher = rospy.Publisher("/traffic_sign/image/compressed", CompressedImage, queue_size=10)
+rospy.loginfo("Publishing /traffic_sign/image/compressed")
+
+
+def callback(ros_data):
+    np_arr = np.fromstring(ros_data.data, np.uint8)
+    img = cv2.imdecode(np_arr, cv2.IMREAD_UNCHANGED)  # OpenCV >= 3.0:
+
+    detect_line(img)
+
+
+def detect_line(image, is_test=False):
     # camera = cv2.VideoCapture(0)
     # while True:
     # ret_val, image = camera.read()
     # image = cv2.rotate(image, ROTATE_180)
 
     # image = cv2.imread("../images/sample-straight.jpg")
-    image = cv2.imread("../images/new-curve.jpg")
-    image = cv2.resize(image, (width, height), interpolation=INTER_LINEAR)
+    # image = cv2.imread("../images/new-curve.jpg")
+
+    image = cv2.resize(image, (width, height), interpolation=cv2.INTER_LINEAR)
     # out = image
     image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
@@ -65,13 +94,12 @@ def detect_line():
     # find road boundaries at bottom of image
     bottom = height - 1
     top = 20  # height-1 - road_detect_step_size * road_detect_max_steps
-    left_edge = right_edge = width_half
+    left_edge = right_edge = None
     # cv2.line(out, (left_edge, bottom), (right_edge, bottom), 100)
 
     old_y = bottom
     print("bottom=%d, top=%d, step=%d" % (bottom, top, road_detect_step_size))
     # for y in range(bottom, 0, road_detect_step_size):
-    left_edge = right_edge = None
 
     for y in range(bottom, top, -road_detect_step_size):
         # print("checking y=%s, left=%s, right=%s" % (y, left_edge, right_edge))
@@ -89,6 +117,8 @@ def detect_line():
         if left_edge is None and right_edge is None:
             # lowest road bounds
             # report delta
+            if not is_test:
+                detection_publisher.publish(middle - width_half)
             pass
         else:
             old_middle = ceil((left_edge + right_edge) / 2)
@@ -106,6 +136,15 @@ def detect_line():
 
     # out = cv2.resize(out, (width*10, height*10))
     cv2.imshow("original with line", out)
+
+    if not is_test:
+        msg = CompressedImage()
+        msg.header.stamp = rospy.Time.now()
+        msg.format = "jpeg"
+        msg.data = np.array(cv2.imencode('.jpg', out)[1]).tostring()
+
+        # Publish new image
+        image_publisher.publish(msg)
 
     while True:
         # Exit when Escape is pressed
@@ -134,4 +173,16 @@ def detect_edge(image, x, y, direction):
         return x + direction
 
 
-detect_line()
+# image = cv2.imread("../images/sample-straight.jpg")
+# image = cv2.imread("../images/new-curve.jpg")
+# detect_line(image)
+
+
+if __name__ == '__main__':
+    init()
+    rospy.init_node('line_follow', log_level=rospy.DEBUG)
+    try:
+        rospy.spin()
+    except KeyboardInterrupt:
+        rospy.loginfo("Shutting down line follow")
+cv2.destroyAllWindows()
