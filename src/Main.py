@@ -51,16 +51,17 @@ raspi_subscriber = detection_publisher = image_publisher = None
 
 
 def init():
-    raspi_subscriber = rospy.Subscriber("/raspicam_node/image/compressed", CompressedImage, callback)
+    global detection_publisher, image_publisher
+
+    roslib.load_manifest('lane_assist')
+    rospy.Subscriber("/raspicam_node/image/compressed", CompressedImage, callback)
     rospy.loginfo("Subscribed to /raspicam_node/image/compressed")
 
-    detection_publisher = rospy.Publisher("/line_follow/detected", Int32, queue_size=10)
+    detection_publisher = rospy.Publisher("/lane_assist/detected", Int32, queue_size=10)
+    rospy.loginfo("Publishing /lane_assist/detected")
 
-
-rospy.loginfo("Publishing /line_follow/detected")
-
-image_publisher = rospy.Publisher("/traffic_sign/image/compressed", CompressedImage, queue_size=10)
-rospy.loginfo("Publishing /traffic_sign/image/compressed")
+    image_publisher = rospy.Publisher("/traffic_sign/image/compressed", CompressedImage, queue_size=10)
+    rospy.loginfo("Publishing /lane_assist/image/compressed")
 
 
 def callback(ros_data):
@@ -183,9 +184,9 @@ def detect_edge(image, x, y, direction):
 
 if __name__ == '__main__':
     init()
-    rospy.init_node('line_follow', log_level=rospy.DEBUG)
+    rospy.init_node('lane_assist', log_level=rospy.DEBUG)
     try:
         rospy.spin()
     except KeyboardInterrupt:
-        rospy.loginfo("Shutting down line follow")
+        rospy.loginfo("Shutting down lane_assist")
 cv2.destroyAllWindows()
