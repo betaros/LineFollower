@@ -1,0 +1,3 @@
+<launch>
+  <node name="line_follower_node" pkg="line_follower" type="Main.py" output="screen" />
+</launch>
