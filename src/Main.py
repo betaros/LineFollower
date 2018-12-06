@@ -2,12 +2,12 @@
 
 # https://gist.github.com/flyboy74/2176de46d5777dafa6fcee891d230637
 import math
+import sys
 
 import cv2
 import numpy as np
 import roslib
 
-roslib.load_manifest('traffic_sign')
 import rospy
 
 from sensor_msgs.msg import CompressedImage
@@ -29,16 +29,16 @@ def ceil(num):
 width = 300
 height = 200
 road_darkest_gray = 120
-road_edge_threshold = 10
-road_edge_threshold_is_upper_limit = True
+road_edge_threshold = int(0xFF/2)
+road_is_black = False
 road_detect_max_steps = 6
+output_precision = 180  # output is scaled from 0 (far left) to output_precision (far right)
 
 # calculated params
 width_half = int(width / 2)
 typical_road_width = width_half
 min_road_width = ceil(typical_road_width / 4)
 road_detect_step_size = ceil(height / 20)
-threshold_multiplier = road_edge_threshold_is_upper_limit * 2 - 1
 
 median_blur_kernel = force_odd_number(int(width / 20))
 gaussian_blur_kernel = force_odd_number(int(width / 30))
@@ -47,7 +47,7 @@ gaussian_blur_kernel = force_odd_number(int(width / 30))
 TO_LEFT = -1
 TO_RIGHT = +1
 
-raspi_subscriber = detection_publisher = image_publisher = None
+detection_publisher = image_publisher = None
 
 
 def init():
@@ -75,12 +75,16 @@ def detect_line(image, is_test=False):
     # camera = cv2.VideoCapture(0)
     # while True:
     # ret_val, image = camera.read()
-    # image = cv2.rotate(image, ROTATE_180)
 
     # image = cv2.imread("../images/sample-straight.jpg")
     # image = cv2.imread("../images/new-curve.jpg")
 
     image = cv2.resize(image, (width, height), interpolation=cv2.INTER_LINEAR)
+
+    if not is_test:
+        image = cv2.rotate(image, cv2.ROTATE_180)
+
+
     # out = image
     image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
@@ -97,18 +101,15 @@ def detect_line(image, is_test=False):
 
     # find road boundaries at bottom of image
     bottom = height - 1
-    top = 20  # height-1 - road_detect_step_size * road_detect_max_steps
-    left_edge = right_edge = None
-    # cv2.line(out, (left_edge, bottom), (right_edge, bottom), 100)
-
+    top = height-1 - road_detect_step_size * road_detect_max_steps
+    left_edge = right_edge = width_half
+    # print("bottom=%d, top=%d, step=%d" % (bottom, top, road_detect_step_size))
     old_y = bottom
-    print("bottom=%d, top=%d, step=%d" % (bottom, top, road_detect_step_size))
-    # for y in range(bottom, 0, road_detect_step_size):
-
+    did_detect_road = False
     for y in range(bottom, top, -road_detect_step_size):
-        # print("checking y=%s, left=%s, right=%s" % (y, left_edge, right_edge))
-        new_left_edge = detect_edge(image, left_edge or width_half, y, TO_LEFT)
-        new_right_edge = detect_edge(image, right_edge or width_half, y, TO_RIGHT)
+        new_left_edge = detect_edge(image, left_edge, y, TO_LEFT)
+        new_right_edge = detect_edge(image, right_edge, y, TO_RIGHT)
+        # print("checking y=%d, left=%s, right=%s  =>  left=%s, right=%s" % (y, left_edge, right_edge, new_left_edge, new_right_edge))
 
         if new_left_edge is None or new_right_edge is None:
             continue
@@ -117,17 +118,38 @@ def detect_line(image, is_test=False):
         #     break
 
         middle = ceil((new_left_edge + new_right_edge) / 2)
-        print("middle=%d; delta=%d" % (middle, middle - width_half))
-        if left_edge is None and right_edge is None:
+        # print("middle=%d; delta=%d" % (middle, middle - width_half))
+        if not did_detect_road:
             # lowest road bounds
             # report delta
             if not is_test:
-                detection_publisher.publish(middle - width_half)
-            pass
+                angle = int((middle - width_half) * output_precision / width)
+                detection_publisher.publish(angle)
+
+                # DEBUG LOG ANGLE
+                scale = 1
+                angle_degree = int(middle * 180 * scale / width)
+                angle_mid = int(90 * scale)
+                angle_end = int(180 * scale)
+
+                # print("angle: %d" % (angle_degree))
+                sys.stdout.write("(")
+                for x in range(0, min(angle_degree, angle_mid)):
+                    sys.stdout.write(" ")
+                for x in range(angle_degree, angle_mid):
+                    sys.stdout.write("<")
+                sys.stdout.write("-")
+                for x in range(angle_mid, angle_degree):
+                    sys.stdout.write(">")
+                for x in range(max(angle_degree, angle_mid), angle_end):
+                    sys.stdout.write(" ")
+                print(") %d\n" % int(angle_degree/scale))
+            did_detect_road = True
+            # break
         else:
             old_middle = ceil((left_edge + right_edge) / 2)
-            cv2.line(out, (left_edge - 5, old_y), (new_left_edge - 5, y), 100)
-            cv2.line(out, (right_edge + 5, old_y), (new_right_edge + 5, y), 100)
+            cv2.line(out, (left_edge + 5, old_y), (new_left_edge + 5, y), 100)
+            cv2.line(out, (right_edge - 5, old_y), (new_right_edge - 5, y), 100)
 
             cv2.line(out, (old_middle, old_y), (middle, y), 100)
         old_y = y
@@ -135,11 +157,27 @@ def detect_line(image, is_test=False):
         left_edge = new_left_edge
         right_edge = new_right_edge
 
-    middle = int((right_edge + left_edge) / 2)
-    cv2.line(out, (middle, old_y - 5), (width_half, old_y + 5), 50)
+    # print("image[x=150, y=199] is_road = %s" % (is_pixel_on_road(image, width_half, bottom)))
+    # print("image[x=20,  y=199] is_road = %s" % (is_pixel_on_road(image, +20, bottom)))
+    # print("image[x=290, y=199] is_road = %s" % (is_pixel_on_road(image, width-10, bottom)))
+    # for x in range(0, width - 1):
+    #     if is_pixel_on_road(image, x, bottom):
+    #         sys.stdout.write("X")
+    #     else:
+    #         sys.stdout.write("-")
+    # sys.stdout.write("\n")
 
-    # out = cv2.resize(out, (width*10, height*10))
-    cv2.imshow("original with line", out)
+
+    if did_detect_road:
+        # road was detected
+        middle = int((right_edge + left_edge) / 2)
+        cv2.line(out, (middle, old_y - 5), (width_half, old_y + 5), 50)
+
+    else:
+        # detected no road at all
+        if not is_test:
+            detection_publisher.publish(-1)
+            print("/!\\ no road detected")
 
     if not is_test:
         msg = CompressedImage()
@@ -150,26 +188,33 @@ def detect_line(image, is_test=False):
         # Publish new image
         image_publisher.publish(msg)
 
-    while True:
-        # Exit when Escape is pressed
-        if cv2.waitKey(1) == 27:
-            break
+    if is_test:
+        # out = cv2.resize(out, (width*10, height*10))
+        cv2.imshow("original with line", out)
+
+        while True:
+            # Exit when Escape is pressed
+            if cv2.waitKey(1) == 27:
+                break
 
 
-def is_on_line(image, x, y):
-    return image[y, x] * threshold_multiplier > road_edge_threshold * threshold_multiplier
+def is_pixel_on_road(image, x, y):
+    pixel_is_dark = (image[y, x] != 0)
+    return pixel_is_dark == road_is_black
 
 
 def detect_edge(image, x, y, direction):
-    if is_on_line(image, x, y):
-        while is_on_line(image, x, y):
+    if is_pixel_on_road(image, x, y):
+        # we're not on the road, move away until we hit the edge
+        while is_pixel_on_road(image, x, y):
             # print("> %d / %d" % (x, width))
             x += direction
             if not (0 <= x < width):
                 return None
         return x - direction
     else:
-        while not is_on_line(image, x, y):
+        # we're not on the road / on the edge marker, moving closer to center until reaching the road
+        while not is_pixel_on_road(image, x, y):
             # print("< %d / %d" % (x, width))
             x -= direction
             if not (0 <= x < width):
