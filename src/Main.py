@@ -123,8 +123,8 @@ def detect_line(image, is_test=False):
             # lowest road bounds
             # report delta
             if not is_test:
-                angle = int((middle - width_half) * output_precision / width)
-                detection_publisher.publish(angle)
+                angle = int(middle * output_precision / width)
+                detection_publisher.publish(int(angle))
 
                 # DEBUG LOG ANGLE
                 scale = 1
@@ -177,7 +177,7 @@ def detect_line(image, is_test=False):
         # detected no road at all
         if not is_test:
             detection_publisher.publish(-1)
-            print("/!\\ no road detected")
+            # print("/!\\ no road detected")
 
     if not is_test:
         msg = CompressedImage()
